@@ -113,9 +113,10 @@ requirements*.txt         serving / training / test dependencies
 
 | | Parameters |
 |---|---|
-| Trainable | _from `reports/training_summary.json`_ |
-| Total | _from `reports/training_summary.json`_ |
-| Trainable share | _from `reports/training_summary.json`_ |
+| Trainable | 594,438 |
+| Total | 86,397,708 |
+| Trainable share | **0.69%** |
+| Saved adapter size | 2.38 MB (vs 343 MB for the full FP32 model) |
 
 **Merging:** after training the adapter is folded into the base weights (`merge_and_unload`). The result is an ordinary ViT with zero adapter overhead at inference, which also means the serving image does not need `peft`.
 
@@ -143,7 +144,7 @@ requirements*.txt         serving / training / test dependencies
 | Single image, native Windows, 6 CPU threads | 132 ms | 11,329 ms |
 | Full evaluation run in WSL2 (Linux) on the same laptop | — | 0.06× FP32 speed |
 
-Because it was slow on both Windows and Linux on the same machine, the cause is the CPU's integer-matmul support rather than the OS; on a server CPU in a pre-selection benchmark, `dynamic` was about 2× faster than FP32. Speedups from quantization depend on the hardware, so the portable mode is the default and `dynamic` is opt-in.
+Because it was slow on both Windows and Linux on the same machine, the cause is the CPU rather than the OS: the laptop's Intel Core i7-10750H has no VNNI or AMX instructions (confirmed from its CPU feature flags), which fast INT8 matmul relies on; on a server CPU in a pre-selection benchmark, `dynamic` was about 2× faster than FP32. Speedups from quantization depend on the hardware, so the portable mode is the default and `dynamic` is opt-in.
 
 **Storage:** each Linear weight is saved as INT8 with one FP32 scale per output row (symmetric per-channel), in safetensors. Biases, LayerNorms and embeddings stay FP32 (they are a small share of the parameters). At load time the weights are restored and torchao quantizes the model in memory.
 
@@ -153,25 +154,45 @@ Because it was slow on both Windows and Linux on the same machine, the cause is 
 
 All numbers come from `reports/training_summary.json` and `reports/quantization_report.json`, produced by the commands in this README. Nothing here is estimated.
 
-**Fine-tuning**
+**Fine-tuning** (NVIDIA RTX 2070 Max-Q, FP16 mixed precision, ~16 s per epoch)
+
+| Epoch | Train loss | Val loss | Val accuracy | Val macro-F1 |
+|---|---|---|---|---|
+| 1 | 0.9701 | 0.2709 | 0.9156 | 0.8754 |
+| 2 | 0.1929 | 0.2373 | 0.9261 | 0.9102 |
+| 3 | 0.0674 | 0.1667 | 0.9446 | 0.9279 |
+| 4 | 0.0277 | 0.1542 | 0.9578 | 0.9506 |
+| 5 | 0.0149 | 0.1458 | 0.9631 | **0.9616** ← best |
+
+**Held-out test set** (379 images, never used for any decision)
 
 | Metric | Value |
 |---|---|
-| Best epoch | _pending run_ |
-| Validation macro-F1 (best) | _pending run_ |
-| Test accuracy | _pending run_ |
-| Test macro-F1 | _pending run_ |
-| LoRA adapter size | _pending run_ |
-| Training hardware | NVIDIA RTX 2070 Max-Q (8 GB) |
+| Accuracy | **0.9129** |
+| Macro-F1 | **0.8779** |
 
-**Quantization (CPU)**
+| Class | cardboard | glass | metal | paper | plastic | trash |
+|---|---|---|---|---|---|---|
+| Test images | 60 | 75 | 62 | 89 | 72 | 21 |
+| F1 | 0.941 | 0.954 | 0.942 | 0.920 | 0.905 | **0.605** |
 
-| | FP32 (merged) | INT8 | Change |
+**Reading these results:**
+- Validation (0.96) is higher than test (0.91) because the checkpoint was *selected* on validation, which makes it optimistic; the test number is the honest estimate. With 379 test images each error moves accuracy by ~0.26 points.
+- The weak class is **trash** (13 of 21 correct). It is the smallest class and the most visually varied (it is "everything else"); most of its errors are confusion with plastic and paper, and some paper/cardboard/metal items are predicted as trash. This is why macro-F1 (0.88) sits below accuracy (0.91), and why checkpoints are selected by macro-F1.
+- Validation macro-F1 was still improving at epoch 5; more epochs, selected on validation only, are a reasonable next experiment.
+
+**Quantization** (CPU: Intel Core i7-10750H, WSL2, 6 threads; `weight_only` mode; same run, same test set)
+
+| | FP32 (merged) | INT8 (as served) | Change |
 |---|---|---|---|
-| Model size | _pending_ | _pending_ | _pending_ |
-| Latency, median (1 image) | _pending_ | _pending_ | _pending_ |
-| Test accuracy | _pending_ | _pending_ | _pending_ |
-| Test macro-F1 | _pending_ | _pending_ | _pending_ |
+| Weights size | 343.23 MB | **88.76 MB** | **3.87× smaller** |
+| Latency, median (1 image) | 146.3 ms | 165.9 ms | 0.88× (≈12% slower) |
+| Latency, p95 | 161.5 ms | 178.3 ms | |
+| Test accuracy | 0.9129 | 0.9129 | 0.0 |
+| Test macro-F1 | 0.8779 | 0.8779 | 0.0 |
+| Test loss | 0.2567 | 0.2582 | +0.0015 |
+
+The confusion matrix is identical before and after quantization. The small latency cost comes from converting INT8 weights back to float for each matmul — the price of `weight_only` mode running on a CPU without fast INT8 instructions (see [Quantization](#quantization)). The raw reports are in `reports/`, including `quantization_report_dynamic.json` from the earlier `dynamic`-mode run.
 
 ## API
 
@@ -196,17 +217,18 @@ PowerShell:
 curl.exe -X POST http://localhost:8000/predict -F "file=@bottle.jpg"
 ```
 
-Response shape (values illustrative):
+Real response from the Dockerized service, for a photo of cardboard pieces that is not part of TrashNet:
+
 ```json
 {
-  "label": "plastic",
-  "confidence": 0.9412,
+  "label": "cardboard",
+  "confidence": 0.9946,
   "top_k": [
-    {"label": "plastic", "confidence": 0.9412},
-    {"label": "glass", "confidence": 0.0391},
-    {"label": "trash", "confidence": 0.0102}
+    {"label": "cardboard", "confidence": 0.9946},
+    {"label": "trash", "confidence": 0.0021},
+    {"label": "paper", "confidence": 0.0021}
   ],
-  "inference_ms": 48.7
+  "inference_ms": 177.57
 }
 ```
 
@@ -239,7 +261,7 @@ Useful training options: `--epochs`, `--batch-size`, `--lr`, `--lora-r`, `--num-
 
 ## Running with Docker
 
-The image contains only the serving code and `models/quantized/`, so run training and quantization first.
+The image contains only the serving code and `models/quantized/`, so run training and quantization first. The resulting image is **462 MB compressed** (what a registry pull downloads) and 1.97 GB unpacked on disk, as reported by Docker Desktop; most of it is the CPU-only PyTorch runtime, and the model accounts for 89 MB. Using the CPU build of PyTorch instead of the default CUDA build keeps the image several times smaller.
 
 ```bash
 docker build -t vit-lora-inference-service .
@@ -249,7 +271,7 @@ docker run -p 8000:8000 vit-lora-inference-service
 docker run -p 8000:8000 -e APP_QUANTIZATION_MODE=dynamic vit-lora-inference-service
 ```
 
-Then open `http://localhost:8000/docs`, or call `/health` and `/predict` as shown above. Docker reports the container as `healthy` once `/health` responds (`docker ps`).
+Then open `http://localhost:8000/docs`, or call `/health` and `/predict` as shown above. On the development laptop the model loads in about 1.4 s at startup, and `docker ps` reports the container as `healthy` once Docker's built-in health check gets a `200` from `/health` (it re-checks every 30 s).
 
 ## Testing
 
@@ -281,7 +303,8 @@ The unit and API tests use a tiny randomly initialised ViT with the real archite
 ## Limitations
 
 - TrashNet images are studio-style photos of a single item on a plain background; accuracy on cluttered real-world photos will be lower.
-- About 2,500 images in total; with 15% held out for testing, test metrics rest on a few hundred images and have noticeable variance.
+- 2,527 images in total; test metrics rest on 379 images (only 21 of them "trash"), so they have noticeable variance.
+- The "trash" class is the weakest (test F1 0.605).
 - One image per request, no batching; a single Uvicorn worker.
 - Quantization speed depends heavily on the CPU: `dynamic` INT8 was ~16× slower than FP32 on the development laptop, hence the `weight_only` default, which reduces memory but does not speed up inference. Reported latencies are for the machine that produced the report.
 - No authentication or rate limiting.
