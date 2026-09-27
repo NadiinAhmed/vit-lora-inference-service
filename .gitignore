@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Environments & secrets
+.venv/
+venv/
+.env
+
+# Model artifacts and data (too large for git — see README "Model artifacts")
+models/*
+!models/.gitkeep
+data/
+*.pt
+*.bin
+*.safetensors
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

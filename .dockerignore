@@ -1,0 +1,16 @@
+# Only src/ and the quantized model are needed in the image.
+.git
+.gitignore
+.venv
+venv
+.env
+__pycache__
+*.pyc
+.pytest_cache
+notebooks
+training
+tests
+data
+requirements-train.txt
+requirements-dev.txt
+README.md
