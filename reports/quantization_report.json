@@ -1,0 +1,155 @@
+{
+  "hardware": {
+    "cpu": "x86_64",
+    "torch_threads": 6
+  },
+  "storage": "INT8 per-row symmetric weights in safetensors (all nn.Linear layers)",
+  "runtime_mode": "weight_only",
+  "test_images": 379,
+  "fp32": {
+    "size_mb": 343.23,
+    "latency": {
+      "median_ms": 146.33,
+      "p95_ms": 161.47
+    },
+    "test": {
+      "accuracy": 0.9129,
+      "macro_f1": 0.8779,
+      "per_class_f1": {
+        "cardboard": 0.9412,
+        "glass": 0.9542,
+        "metal": 0.9421,
+        "paper": 0.9195,
+        "plastic": 0.9054,
+        "trash": 0.6047
+      },
+      "confusion_matrix": [
+        [
+          56,
+          0,
+          0,
+          2,
+          0,
+          2
+        ],
+        [
+          0,
+          73,
+          0,
+          0,
+          2,
+          0
+        ],
+        [
+          0,
+          2,
+          57,
+          1,
+          0,
+          2
+        ],
+        [
+          2,
+          0,
+          0,
+          80,
+          3,
+          4
+        ],
+        [
+          0,
+          3,
+          1,
+          0,
+          67,
+          1
+        ],
+        [
+          1,
+          0,
+          1,
+          2,
+          4,
+          13
+        ]
+      ],
+      "loss": 0.2567
+    }
+  },
+  "int8": {
+    "size_mb": 88.76,
+    "latency": {
+      "median_ms": 165.9,
+      "p95_ms": 178.31
+    },
+    "test": {
+      "accuracy": 0.9129,
+      "macro_f1": 0.8779,
+      "per_class_f1": {
+        "cardboard": 0.9412,
+        "glass": 0.9542,
+        "metal": 0.9421,
+        "paper": 0.9195,
+        "plastic": 0.9054,
+        "trash": 0.6047
+      },
+      "confusion_matrix": [
+        [
+          56,
+          0,
+          0,
+          2,
+          0,
+          2
+        ],
+        [
+          0,
+          73,
+          0,
+          0,
+          2,
+          0
+        ],
+        [
+          0,
+          2,
+          57,
+          1,
+          0,
+          2
+        ],
+        [
+          2,
+          0,
+          0,
+          80,
+          3,
+          4
+        ],
+        [
+          0,
+          3,
+          1,
+          0,
+          67,
+          1
+        ],
+        [
+          1,
+          0,
+          1,
+          2,
+          4,
+          13
+        ]
+      ],
+      "loss": 0.2582
+    }
+  },
+  "comparison": {
+    "size_reduction_x": 3.87,
+    "latency_speedup_x": 0.88,
+    "accuracy_change": 0.0,
+    "macro_f1_change": 0.0
+  }
+}

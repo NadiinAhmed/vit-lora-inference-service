@@ -7,6 +7,7 @@ limits out of the code so the same image runs locally and in Docker.
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,11 +23,17 @@ class Settings(BaseSettings):
     # --- Model -------------------------------------------------------------
     base_model_name: str = "google/vit-base-patch16-224-in21k"
     model_dir: Path = PROJECT_ROOT / "models"
+    data_dir: Path = PROJECT_ROOT / "data"        # downloaded datasets (git-ignored)
+    reports_dir: Path = PROJECT_ROOT / "reports"  # small JSON results (committed)
 
     # --- Serving -----------------------------------------------------------
     top_k: int = Field(default=3, ge=1)
     max_image_bytes: int = Field(default=5 * 1024 * 1024, gt=0)  # 5 MB upload limit
     log_level: str = "INFO"
+    # How the INT8 weights are executed at runtime (same model file for both):
+    #   weight_only - INT8 weights in memory, float math: ~4x less weight memory, works well on any CPU
+    #   dynamic     - INT8 x INT8 math: faster only on CPUs with fast integer matmul (e.g. VNNI/AMX)
+    quantization_mode: Literal["weight_only", "dynamic"] = "weight_only"
 
     # --- Derived artifact locations ---------------------------------------
     @property
@@ -41,7 +48,7 @@ class Settings(BaseSettings):
 
     @property
     def quantized_weights_path(self) -> Path:
-        return self.quantized_model_dir / "model_int8.pt"
+        return self.quantized_model_dir / "model_int8.safetensors"
 
 
 @lru_cache

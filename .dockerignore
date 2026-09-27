@@ -1,16 +1,17 @@
-# Only src/ and the quantized model are needed in the image.
+# Keep the build context small: the image only needs src/, requirements.txt and models/quantized/.
 .git
 .gitignore
 .venv
 venv
 .env
-__pycache__
-*.pyc
+**/__pycache__
+**/*.pyc
 .pytest_cache
-notebooks
+data
+models/lora_best
+reports
 training
 tests
-data
 requirements-train.txt
 requirements-dev.txt
 README.md

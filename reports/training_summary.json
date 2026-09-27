@@ -1,0 +1,158 @@
+{
+  "base_model": "google/vit-base-patch16-224-in21k",
+  "class_names": [
+    "cardboard",
+    "glass",
+    "metal",
+    "paper",
+    "plastic",
+    "trash"
+  ],
+  "seed": 42,
+  "val_fraction": 0.15,
+  "test_fraction": 0.15,
+  "device": "cuda",
+  "mixed_precision_fp16": true,
+  "split_sizes": {
+    "train": 1769,
+    "validation": 379,
+    "test": 379
+  },
+  "hyperparameters": {
+    "epochs": 5,
+    "batch_size": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "warmup_ratio": 0.1,
+    "lora_r": 16,
+    "lora_alpha": 16,
+    "lora_dropout": 0.1,
+    "val_fraction": 0.15,
+    "test_fraction": 0.15,
+    "seed": 42,
+    "num_workers": 2,
+    "no_amp": false
+  },
+  "lora": {
+    "target_modules": [
+      "q_proj",
+      "v_proj"
+    ],
+    "fully_trained_modules": [
+      "classifier"
+    ]
+  },
+  "parameters": {
+    "trainable": 594438,
+    "total": 86397708,
+    "trainable_pct": 0.688
+  },
+  "adapter_size_mb": 2.38,
+  "best_epoch": 5,
+  "best_val_macro_f1": 0.9616,
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.9701,
+      "val_loss": 0.2709,
+      "val_accuracy": 0.9156,
+      "val_macro_f1": 0.8754,
+      "epoch_seconds": 42.5
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.1929,
+      "val_loss": 0.2373,
+      "val_accuracy": 0.9261,
+      "val_macro_f1": 0.9102,
+      "epoch_seconds": 15.6
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.0674,
+      "val_loss": 0.1667,
+      "val_accuracy": 0.9446,
+      "val_macro_f1": 0.9279,
+      "epoch_seconds": 15.8
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.0277,
+      "val_loss": 0.1542,
+      "val_accuracy": 0.9578,
+      "val_macro_f1": 0.9506,
+      "epoch_seconds": 15.9
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.0149,
+      "val_loss": 0.1458,
+      "val_accuracy": 0.9631,
+      "val_macro_f1": 0.9616,
+      "epoch_seconds": 16.1
+    }
+  ],
+  "test": {
+    "accuracy": 0.9129,
+    "macro_f1": 0.8779,
+    "per_class_f1": {
+      "cardboard": 0.9412,
+      "glass": 0.9542,
+      "metal": 0.9421,
+      "paper": 0.9195,
+      "plastic": 0.9054,
+      "trash": 0.6047
+    },
+    "confusion_matrix": [
+      [
+        56,
+        0,
+        0,
+        2,
+        0,
+        2
+      ],
+      [
+        0,
+        73,
+        0,
+        0,
+        2,
+        0
+      ],
+      [
+        0,
+        2,
+        57,
+        1,
+        0,
+        2
+      ],
+      [
+        2,
+        0,
+        0,
+        80,
+        3,
+        4
+      ],
+      [
+        0,
+        3,
+        1,
+        0,
+        67,
+        1
+      ],
+      [
+        1,
+        0,
+        1,
+        2,
+        4,
+        13
+      ]
+    ],
+    "loss": 0.2567
+  }
+}

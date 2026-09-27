@@ -1,6 +1,8 @@
 # Serving dependencies only — this is what goes into the Docker image.
 # LoRA is merged into the base weights before quantization, so `peft` is not needed at inference time.
 torch==2.14.0
+torchao==0.18.0
+safetensors==0.8.0
 transformers==5.17.0
 fastapi==0.141.1
 uvicorn[standard]==0.54.0
