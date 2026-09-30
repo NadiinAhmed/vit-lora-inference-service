@@ -1,6 +1,6 @@
 # ViT LoRA Inference Service
 
-An end-to-end Vision Transformer image classification service featuring parameter-efficient LoRA fine-tuning, model quantization, FastAPI inference, Docker containerization, and automated testing.
+An end-to-end Vision Transformer image classification service featuring parameter-efficient LoRA fine-tuning, model quantization, FastAPI inference, Docker containerization, automated testing, and an MLOps CI/CD pipeline that validates, packages and deploys the model on every change.
 
 ## Overview
 
@@ -17,6 +17,8 @@ The pipeline covers the full lifecycle: fine-tune a pretrained ViT with LoRA, ke
 - FastAPI service with input validation, typed responses and OpenAPI docs
 - CPU-only Docker image with health check and non-root user
 - Automated tests (unit + API + real-model smoke test)
+- MLOps CI/CD with GitHub Actions: tests → model validation → Docker build → deployment verification
+- Versioned model artifact (GitHub Release) pinned by SHA-256, with an automated model quality gate
 
 ## Architecture
 
@@ -60,6 +62,9 @@ The same `src/preprocessing.py` is used in training and serving, so the model se
 | Pydantic / pydantic-settings | Response schemas and typed, env-driven configuration |
 | Docker | Reproducible CPU serving image |
 | pytest | Automated tests |
+| GitHub Actions | CI/CD pipeline (`.github/workflows/ci-cd.yml`) |
+| GitHub Releases | Versioned storage for the serving model artifact |
+| GitHub Container Registry (GHCR) | Registry for the deployed Docker image |
 
 ## Project Structure
 
@@ -77,8 +82,15 @@ training/                 Offline pipeline — never shipped in the Docker image
   train_lora.py           LoRA fine-tuning with best-checkpoint selection
   quantize.py             Merge LoRA -> INT8 -> measure -> save -> verify reload
 tests/                    pytest suite
+  assets/sample.jpg       Real photo used by the deployment smoke test
 reports/                  JSON results from training and quantization (committed)
-models/                   Generated model artifacts (git-ignored)
+models/                   Generated model artifacts (git-ignored; published as a GitHub Release)
+scripts/
+  check_model_metrics.py  Model quality gate used by CI
+  smoke_test.sh           HTTP smoke test of a running container (CI and deployment verification)
+.github/workflows/
+  ci-cd.yml               GitHub Actions pipeline: test -> model-validation -> docker-build -> deploy
+model_artifact.sha256     SHA-256 pin of the released model files
 Dockerfile, .dockerignore Serving image
 requirements*.txt         serving / training / test dependencies
 ```
@@ -154,43 +166,43 @@ Because it was slow on both Windows and Linux on the same machine, the cause is 
 
 All numbers come from `reports/training_summary.json` and `reports/quantization_report.json`, produced by the commands in this README. Nothing here is estimated.
 
-**Fine-tuning** (NVIDIA RTX 2070 Max-Q, FP16 mixed precision, ~16 s per epoch)
+**Fine-tuning** (NVIDIA RTX 2070 Max-Q, FP16 mixed precision, ~117 s per epoch on native Windows; an earlier run of the same code took ~16 s per epoch, and the difference was not investigated)
 
 | Epoch | Train loss | Val loss | Val accuracy | Val macro-F1 |
 |---|---|---|---|---|
 | 1 | 0.9701 | 0.2709 | 0.9156 | 0.8754 |
-| 2 | 0.1929 | 0.2373 | 0.9261 | 0.9102 |
-| 3 | 0.0674 | 0.1667 | 0.9446 | 0.9279 |
-| 4 | 0.0277 | 0.1542 | 0.9578 | 0.9506 |
-| 5 | 0.0149 | 0.1458 | 0.9631 | **0.9616** ← best |
+| 2 | 0.1928 | 0.2360 | 0.9235 | 0.9078 |
+| 3 | 0.0662 | 0.1693 | 0.9472 | 0.9321 |
+| 4 | 0.0272 | 0.1600 | 0.9499 | 0.9417 |
+| 5 | 0.0150 | 0.1490 | 0.9578 | **0.9493** ← best |
 
 **Held-out test set** (379 images, never used for any decision)
 
 | Metric | Value |
 |---|---|
-| Accuracy | **0.9129** |
-| Macro-F1 | **0.8779** |
+| Accuracy | **0.9182** |
+| Macro-F1 | **0.8839** |
 
 | Class | cardboard | glass | metal | paper | plastic | trash |
 |---|---|---|---|---|---|---|
 | Test images | 60 | 75 | 62 | 89 | 72 | 21 |
-| F1 | 0.941 | 0.954 | 0.942 | 0.920 | 0.905 | **0.605** |
+| F1 | 0.959 | 0.948 | 0.943 | 0.930 | 0.904 | **0.619** |
 
 **Reading these results:**
-- Validation (0.96) is higher than test (0.91) because the checkpoint was *selected* on validation, which makes it optimistic; the test number is the honest estimate. With 379 test images each error moves accuracy by ~0.26 points.
-- The weak class is **trash** (13 of 21 correct). It is the smallest class and the most visually varied (it is "everything else"); most of its errors are confusion with plastic and paper, and some paper/cardboard/metal items are predicted as trash. This is why macro-F1 (0.88) sits below accuracy (0.91), and why checkpoints are selected by macro-F1.
+- Validation macro-F1 (0.95) is higher than test macro-F1 (0.88) because the checkpoint was *selected* on validation, which makes it optimistic; the test number is the honest estimate. With 379 test images each error moves accuracy by ~0.26 points.
+- The weak class is **trash** (13 of 21 correct). It is the smallest class and the most visually varied (it is "everything else"); most of its errors are confusion with plastic and paper, and some paper/cardboard/metal items are predicted as trash. This is why macro-F1 (0.88) sits below accuracy (0.92), and why checkpoints are selected by macro-F1.
 - Validation macro-F1 was still improving at epoch 5; more epochs, selected on validation only, are a reasonable next experiment.
 
-**Quantization** (CPU: Intel Core i7-10750H, WSL2, 6 threads; `weight_only` mode; same run, same test set)
+**Quantization** (CPU: Intel Core i7-10750H, native Windows, 6 threads; `weight_only` mode; same run, same test set)
 
 | | FP32 (merged) | INT8 (as served) | Change |
 |---|---|---|---|
 | Weights size | 343.23 MB | **88.76 MB** | **3.87× smaller** |
-| Latency, median (1 image) | 146.3 ms | 165.9 ms | 0.88× (≈12% slower) |
-| Latency, p95 | 161.5 ms | 178.3 ms | |
-| Test accuracy | 0.9129 | 0.9129 | 0.0 |
-| Test macro-F1 | 0.8779 | 0.8779 | 0.0 |
-| Test loss | 0.2567 | 0.2582 | +0.0015 |
+| Latency, median (1 image) | 210.9 ms | 257.4 ms | 0.82× (≈18% slower) |
+| Latency, p95 | 227.5 ms | 278.4 ms | |
+| Test accuracy | 0.9182 | 0.9182 | 0.0 |
+| Test macro-F1 | 0.8839 | 0.8839 | 0.0 |
+| Test loss | 0.2563 | 0.2573 | +0.0010 |
 
 The confusion matrix is identical before and after quantization. The small latency cost comes from converting INT8 weights back to float for each matmul — the price of `weight_only` mode running on a CPU without fast INT8 instructions (see [Quantization](#quantization)). The raw reports are in `reports/`, including `quantization_report_dynamic.json` from the earlier `dynamic`-mode run.
 
@@ -261,7 +273,16 @@ Useful training options: `--epochs`, `--batch-size`, `--lr`, `--lora-r`, `--num-
 
 ## Running with Docker
 
-The image contains only the serving code and `models/quantized/`, so run training and quantization first. The resulting image is **462 MB compressed** (what a registry pull downloads) and 1.97 GB unpacked on disk, as reported by Docker Desktop; most of it is the CPU-only PyTorch runtime, and the model accounts for 89 MB. Using the CPU build of PyTorch instead of the default CUDA build keeps the image several times smaller.
+The image contains only the serving code and `models/quantized/`. Either run training and quantization first, or download the released model and verify it (this is exactly what CI does):
+
+```bash
+gh release download model-v1.0.0 --dir models/quantized   # or download the 3 files from the Releases page
+sha256sum --check model_artifact.sha256                   # PowerShell: Get-FileHash models\quantized\* -Algorithm SHA256
+```
+
+A verified image is also published by the pipeline: `docker pull ghcr.io/nadiinahmed/vit-lora-inference-service:latest` (authenticate with `docker login ghcr.io` if the package is private).
+
+The resulting image is **462 MB compressed** (what a registry pull downloads) and 1.97 GB unpacked on disk, as reported by Docker Desktop; most of it is the CPU-only PyTorch runtime, and the model accounts for 89 MB. Using the CPU build of PyTorch instead of the default CUDA build keeps the image several times smaller.
 
 ```bash
 docker build -t vit-lora-inference-service .
@@ -286,7 +307,135 @@ pytest
 | `tests/test_data.py` | Stratified split proportions, no train/test leakage, determinism, dataset folder discovery, metric correctness on a known case |
 | `tests/test_real_model.py` | Loads the real quantized model and predicts (skipped until it exists) |
 
+In CI the real-model test is not skipped: the pipeline downloads the released model first (see [MLOps Pipeline](#mlops-pipeline)).
+
 The unit and API tests use a tiny randomly initialised ViT with the real architecture, so they run in about a second, offline, and exercise the same quantize → save → load → predict code path as production.
+
+## MLOps Pipeline
+
+The project separates the ML lifecycle into stages with different triggers:
+
+| Stage | Where it runs | When | Output |
+|---|---|---|---|
+| Training + quantization | Offline, GPU workstation (`training/`) | Deliberately, when data or hyperparameters change | Model files + `reports/*.json` |
+| Model release | GitHub Release `model-vX.Y.Z` | Manually, after reviewing the reports | Versioned, downloadable model |
+| CI | GitHub Actions | Every pull request and every push to `develop` / `main` | Validated code, model and container |
+| CD | GitHub Actions | Push to `main` only | Image in GHCR, deployed, verified and promoted |
+
+**Training is intentionally not part of CI.** It is slow, needs a GPU, and most commits (API, tests, docs) do not change the model. CI/CD consumes the released model instead, so a code change is always tested against the exact model that will ship.
+
+```mermaid
+flowchart LR
+    subgraph Offline["Training (offline, GPU)"]
+        T[train_lora.py] --> Q[quantize.py]
+    end
+    Q -->|upload| GR[(GitHub Release<br/>model-v1.0.0)]
+    Q -->|commit| G[reports/*.json<br/>model_artifact.sha256]
+    subgraph CICD["GitHub Actions"]
+        J1[test] --> J2[model-validation] --> J3[docker-build] --> J4[deploy<br/>main only]
+    end
+    GR -->|download + SHA-256| J2
+    G -->|pin + quality gate| J2
+    J3 -->|push image, main only| REG[(GHCR)]
+    REG -->|pull, verify, promote| J4
+```
+
+### Code and model artifacts
+
+| Artifact | Stored in | Versioned by |
+|---|---|---|
+| Source code, tests, workflow | Git | Commits |
+| Evaluation reports | Git (`reports/`) | Commits, together with the model pin |
+| Serving model (89 MB) | GitHub Release `model-v1.0.0` | Release tag + SHA-256 in `model_artifact.sha256` |
+| Docker image | GitHub Container Registry | Commit SHA tag, plus `latest` after verification |
+
+The model is too large for Git, so the repository **pins** it instead of storing it: `model_artifact.sha256` lists the fingerprint of each model file. CI downloads the release and runs `sha256sum --check`; a missing, corrupted or swapped model fails the pipeline. Shipping a different model therefore requires a reviewed change to this file, just like bumping a pinned dependency.
+
+### Git branching strategy
+
+```
+main        production   – every push is deployed
+  ↑ pull request
+develop     integration  – every push is validated, never deployed
+  ↑ pull request
+feature/*   work         – validated through its pull request
+```
+
+Changes reach `main` only through `develop`, and both merges happen through pull requests whose checks must pass. Typical flow:
+
+```bash
+git checkout develop && git pull
+git checkout -b feature/my-change
+git status && git diff                       # review the work
+git add <files> && git commit -m "Describe the change"
+git push -u origin feature/my-change         # then open a PR into develop
+git merge develop                            # if develop moved on: resolve conflicts, git add, git commit
+```
+
+A release is a pull request from `develop` into `main`.
+
+### Workflow jobs
+
+`.github/workflows/ci-cd.yml` chains four jobs with `needs:`, so each runs only if the previous one passed:
+
+| Job | Question it answers | What it does |
+|---|---|---|
+| `test` | Is the **code** correct? | Runs the pytest suite with a tiny random ViT (fast, offline). |
+| `model-validation` | Is the **model** correct? | Downloads release `model-v1.0.0`, verifies SHA-256, runs the quality gate on the reported INT8 test metrics, runs inference with the real model, and hands the verified model to the next job as a workflow artifact. |
+| `docker-build` | Is the **service** correct? | Builds the image with the verified model, starts it, and runs `scripts/smoke_test.sh`: `/health`, a real photo through `/predict` (must be classified correctly), and rejection of non-images. On `main` it publishes the image to GHCR, tagged with the commit SHA. |
+| `deploy` | Is the **release** correct? | Pulls the exact image built for this commit, starts it, repeats the smoke test, waits for Docker's HEALTHCHECK to report `healthy`, then promotes the image to `:latest`. |
+
+### Triggers
+
+| Event | test | model-validation | docker-build | deploy |
+|---|:-:|:-:|:-:|:-:|
+| Pull request into `develop` or `main` | ✅ | ✅ | ✅ (no publish) | – |
+| Push to `develop` | ✅ | ✅ | ✅ (no publish) | – |
+| Push to `main` | ✅ | ✅ | ✅ + publish | ✅ |
+| Push to `feature/*` | – | – | – | – |
+| Manual run (`workflow_dispatch`) | ✅ | ✅ | ✅ (no publish) | – |
+
+Feature branches are validated through their pull request rather than on every push.
+
+### Quality gates
+
+A change cannot reach production unless all of these pass:
+
+- **Tests:** unit, API-contract and real-model tests.
+- **Model integrity:** every model file matches its SHA-256 in `model_artifact.sha256`.
+- **Model quality:** `scripts/check_model_metrics.py` requires INT8 test accuracy ≥ 0.85, macro-F1 ≥ 0.80, and an FP32 → INT8 accuracy drop of at most 1 point. Thresholds live in the workflow's `env:` block.
+- **Service behaviour:** the running container loads the model, classifies a real photo (`tests/assets/sample.jpg`) as `cardboard`, and rejects non-image uploads with 415.
+
+### Deployment
+
+- **Registry:** GitHub Container Registry, authenticated with the workflow's automatic `GITHUB_TOKEN`. No credentials are stored in the repository or in secrets.
+- **Build once, deploy the same image:** the image tested in `docker-build` is the one pushed, pulled and verified in `deploy`. `:latest` moves only after verification succeeds.
+- **Traceability:** the image carries the labels `model.version` and `org.opencontainers.image.revision`, and the `deploy` job uses the `production` environment, so each deployment appears on the repository's Deployments page.
+- **Scope:** the deployment target is a fresh GitHub-hosted runner, which stands in for a production host. Deploying to a long-running server (VM, Kubernetes, a managed container service) would reuse the same pull → run → smoke test → promote steps.
+
+### Reproducibility
+
+Everything that affects a result is pinned: Python packages (`requirements*.txt`), the model (`model_artifact.sha256`), the data split (seed 42), the CI runner OS (`ubuntu-24.04`) and the major versions of every GitHub Action.
+
+### Releasing a new model version
+
+1. Retrain and quantize locally, and review `reports/*.json`.
+2. Create a GitHub Release, e.g. `model-v1.1.0`, with the three files from `models/quantized/`.
+3. On a feature branch, set `MODEL_VERSION` in the workflow and regenerate the pin: `sha256sum models/quantized/* > model_artifact.sha256`.
+4. Commit the reports, the pin and the workflow change together, and open a pull request. The pipeline validates the new model before it can reach `main`.
+
+### Running the pipeline checks locally
+
+```bash
+pytest -v
+gh release download model-v1.0.0 --dir models/quantized
+sha256sum --check model_artifact.sha256
+python scripts/check_model_metrics.py
+pytest tests/test_real_model.py -v
+docker build -t vit-lora-inference-service .
+docker run -d --name inference -p 8000:8000 vit-lora-inference-service
+bash scripts/smoke_test.sh http://localhost:8000 tests/assets/sample.jpg cardboard
+```
 
 ## Engineering Decisions
 
@@ -298,6 +447,9 @@ The unit and API tests use a tiny randomly initialised ViT with the real archite
 - **Model loaded once at startup (lifespan), fail fast.** If the model cannot load, the server does not start instead of accepting traffic it cannot serve.
 - **Synchronous `/predict` handler.** Inference is CPU-bound; FastAPI runs sync handlers in a thread pool so the event loop stays responsive.
 - **Portable, code-free model file.** Linear weights are stored as INT8 tensors + per-row scales in **safetensors** (raw tensors, no pickle), and quantized in memory at load time. An earlier `torch.save` version broke on Windows because torchao's pickled tensor objects need `getattr` to rebuild; allowlisting that would have reopened the code-execution risk, so the format was changed instead.
+- **No retraining in CI.** Training is a deliberate offline step; CI validates and ships the released model artifact.
+- **Model pinned by checksum, not stored in Git.** Keeps the repository small while making every build traceable to exact model bytes.
+- **Build once, promote the same image.** Deployment reuses the tested image instead of rebuilding it.
 - **Docker layering.** CPU-only torch is installed in its own cached layer; code and model are copied last because they change most often. Runs as a non-root user with `HF_HUB_OFFLINE=1`.
 
 ## Limitations
@@ -308,6 +460,8 @@ The unit and API tests use a tiny randomly initialised ViT with the real archite
 - One image per request, no batching; a single Uvicorn worker.
 - Quantization speed depends heavily on the CPU: `dynamic` INT8 was ~16× slower than FP32 on the development laptop, hence the `weight_only` default, which reduces memory but does not speed up inference. Reported latencies are for the machine that produced the report.
 - No authentication or rate limiting.
+- The quality gate checks the metrics recorded when the model was produced; CI does not re-evaluate the model on the test set.
+- Deployment is verified on a GitHub-hosted runner, not on a long-running server.
 
 ## Future Improvements
 
@@ -316,13 +470,15 @@ The unit and API tests use a tiny randomly initialised ViT with the real archite
 - Benchmark `dynamic` mode on a VNNI/AMX server CPU; static INT8 or lower-bit quantization, evaluated against the same test split
 - Training on more varied, real-world waste images
 - Model monitoring (prediction distribution, confidence drift)
-- CI/CD with GitHub Actions: automated tests and Docker image builds
-- Model registry / object storage for artifacts instead of baking them into the image
+- Automated retraining pipeline triggered by new labelled data (CI/CD with GitHub Actions is now implemented)
+- Re-evaluate the model on the held-out test set inside CI instead of trusting the committed report
+- Dedicated model registry (e.g. MLflow) and loading the model at startup instead of baking it into the image
 - Cloud deployment, Kubernetes, authentication and rate limiting
 
 ## Model Artifacts
 
-Trained weights are not committed (see `.gitignore`). Reproduce them with the two training commands above (per-epoch training time is recorded in `reports/training_summary.json`). For sharing, publish the quantized folder to the Hugging Face Hub or object storage and download it before `docker build`.
+Trained weights are not committed (see `.gitignore`). The serving model is published as the GitHub Release [`model-v1.0.0`](https://github.com/NadiinAhmed/vit-lora-inference-service/releases/tag/model-v1.0.0) and pinned by `model_artifact.sha256`. To reproduce it instead, run the two training commands above (per-epoch training time is recorded in `reports/training_summary.json`).
+
 ## License
 
 This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
