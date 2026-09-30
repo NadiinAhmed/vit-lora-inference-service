@@ -31,14 +31,14 @@ jobs:
   # 1) Is the CODE correct? Fast tests with a tiny random ViT, no model download.
   test:
     name: Unit & API tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # pinned: "latest" moves to a new OS without warning
     timeout-minutes: 20
     steps:
       - name: Check out the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -57,14 +57,14 @@ jobs:
   model-validation:
     name: Model artifact validation
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # pinned: "latest" moves to a new OS without warning
     timeout-minutes: 20
     steps:
       - name: Check out the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -98,7 +98,7 @@ jobs:
         run: pytest tests/test_real_model.py -v -rs
 
       - name: Pass the verified model to the next job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: model-quantized
           path: models/quantized/
@@ -108,17 +108,17 @@ jobs:
   docker-build:
     name: Build & smoke-test Docker image
     needs: model-validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # pinned: "latest" moves to a new OS without warning
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write                # only used on main, to publish the image
     steps:
       - name: Check out the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Get the verified model
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: model-quantized
           path: models/quantized
@@ -158,7 +158,7 @@ jobs:
     name: Deploy & verify (production)
     needs: docker-build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # pinned: "latest" moves to a new OS without warning
     timeout-minutes: 15
     permissions:
       contents: read
@@ -168,7 +168,7 @@ jobs:
       url: https://github.com/${{ github.repository }}/pkgs/container/vit-lora-inference-service
     steps:
       - name: Check out the code (smoke-test script and sample image only)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set image name
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
