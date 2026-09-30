@@ -49,7 +49,7 @@
   },
   "adapter_size_mb": 2.38,
   "best_epoch": 5,
-  "best_val_macro_f1": 0.9616,
+  "best_val_macro_f1": 0.9493,
   "history": [
     {
       "epoch": 1,
@@ -57,60 +57,60 @@
       "val_loss": 0.2709,
       "val_accuracy": 0.9156,
       "val_macro_f1": 0.8754,
-      "epoch_seconds": 42.5
+      "epoch_seconds": 160.4
     },
     {
       "epoch": 2,
-      "train_loss": 0.1929,
-      "val_loss": 0.2373,
-      "val_accuracy": 0.9261,
-      "val_macro_f1": 0.9102,
-      "epoch_seconds": 15.6
+      "train_loss": 0.1928,
+      "val_loss": 0.236,
+      "val_accuracy": 0.9235,
+      "val_macro_f1": 0.9078,
+      "epoch_seconds": 115.9
     },
     {
       "epoch": 3,
-      "train_loss": 0.0674,
-      "val_loss": 0.1667,
-      "val_accuracy": 0.9446,
-      "val_macro_f1": 0.9279,
-      "epoch_seconds": 15.8
+      "train_loss": 0.0662,
+      "val_loss": 0.1693,
+      "val_accuracy": 0.9472,
+      "val_macro_f1": 0.9321,
+      "epoch_seconds": 116.0
     },
     {
       "epoch": 4,
-      "train_loss": 0.0277,
-      "val_loss": 0.1542,
-      "val_accuracy": 0.9578,
-      "val_macro_f1": 0.9506,
-      "epoch_seconds": 15.9
+      "train_loss": 0.0272,
+      "val_loss": 0.16,
+      "val_accuracy": 0.9499,
+      "val_macro_f1": 0.9417,
+      "epoch_seconds": 117.0
     },
     {
       "epoch": 5,
-      "train_loss": 0.0149,
-      "val_loss": 0.1458,
-      "val_accuracy": 0.9631,
-      "val_macro_f1": 0.9616,
-      "epoch_seconds": 16.1
+      "train_loss": 0.015,
+      "val_loss": 0.149,
+      "val_accuracy": 0.9578,
+      "val_macro_f1": 0.9493,
+      "epoch_seconds": 117.2
     }
   ],
   "test": {
-    "accuracy": 0.9129,
-    "macro_f1": 0.8779,
+    "accuracy": 0.9182,
+    "macro_f1": 0.8839,
     "per_class_f1": {
-      "cardboard": 0.9412,
-      "glass": 0.9542,
-      "metal": 0.9421,
-      "paper": 0.9195,
-      "plastic": 0.9054,
-      "trash": 0.6047
+      "cardboard": 0.9587,
+      "glass": 0.9481,
+      "metal": 0.9431,
+      "paper": 0.9302,
+      "plastic": 0.9041,
+      "trash": 0.619
     },
     "confusion_matrix": [
       [
-        56,
+        58,
         0,
         0,
-        2,
+        1,
         0,
-        2
+        1
       ],
       [
         0,
@@ -122,26 +122,26 @@
       ],
       [
         0,
-        2,
-        57,
-        1,
+        3,
+        58,
         0,
-        2
+        0,
+        1
       ],
       [
         2,
         0,
         0,
         80,
-        3,
-        4
+        2,
+        5
       ],
       [
         0,
         3,
-        1,
+        2,
         0,
-        67,
+        66,
         1
       ],
       [
@@ -153,6 +153,6 @@
         13
       ]
     ],
-    "loss": 0.2567
+    "loss": 0.2563
   }
 }
