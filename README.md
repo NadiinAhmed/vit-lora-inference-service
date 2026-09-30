@@ -323,3 +323,6 @@ The unit and API tests use a tiny randomly initialised ViT with the real archite
 ## Model Artifacts
 
 Trained weights are not committed (see `.gitignore`). Reproduce them with the two training commands above (per-epoch training time is recorded in `reports/training_summary.json`). For sharing, publish the quantized folder to the Hugging Face Hub or object storage and download it before `docker build`.
+## License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
