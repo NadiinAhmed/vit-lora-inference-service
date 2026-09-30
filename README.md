@@ -316,7 +316,7 @@ The unit and API tests use a tiny randomly initialised ViT with the real archite
 - Benchmark `dynamic` mode on a VNNI/AMX server CPU; static INT8 or lower-bit quantization, evaluated against the same test split
 - Training on more varied, real-world waste images
 - Model monitoring (prediction distribution, confidence drift)
-- CI/CD running tests and building the image on every push
+- CI/CD with GitHub Actions: automated tests and Docker image builds
 - Model registry / object storage for artifacts instead of baking them into the image
 - Cloud deployment, Kubernetes, authentication and rate limiting
 
