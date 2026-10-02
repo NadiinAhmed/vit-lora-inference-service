@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client import REGISTRY
 
 from src.api import create_app
 from src.config import get_settings
@@ -84,3 +85,35 @@ def test_predict_rejects_oversized_upload(service: InferenceService, prediction_
         assert response.status_code == 413
     finally:
         get_settings.cache_clear()
+
+
+def _metric(name: str, **labels: str) -> float:
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+def test_metrics_endpoint_exposes_prometheus_text(client: TestClient) -> None:
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "model_loaded 1.0" in response.text
+    assert 'model_info{model_version="model-v1.0.0"} 1.0' in response.text
+
+
+def test_metrics_count_predictions_and_errors(client: TestClient) -> None:
+    ok_before = _metric("http_requests_total", method="POST", path="/predict", status="200")
+    unsupported_before = _metric("http_requests_total", method="POST", path="/predict", status="415")
+    confidences_before = _metric("model_prediction_confidence_count")
+
+    label = client.post("/predict", files={"file": ("a.png", image_bytes(), "image/png")}).json()["label"]
+    client.post("/predict", files={"file": ("notes.txt", b"hello", "text/plain")})
+
+    assert _metric("http_requests_total", method="POST", path="/predict", status="200") == ok_before + 1
+    assert _metric("http_requests_total", method="POST", path="/predict", status="415") == unsupported_before + 1
+    assert _metric("model_prediction_confidence_count") == confidences_before + 1
+    assert _metric("model_predictions_total", label=label) >= 1
+
+
+def test_unknown_paths_share_one_metric_label(client: TestClient) -> None:
+    before = _metric("http_requests_total", method="GET", path="unmatched", status="404")
+    client.get("/wp-admin/random-scanner-path")
+    assert _metric("http_requests_total", method="GET", path="unmatched", status="404") == before + 1

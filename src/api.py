@@ -11,8 +11,10 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile, status
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from src import metrics
 from src.config import get_settings
 from src.image_stats import compute_image_stats
 from src.inference import InferenceService
@@ -36,7 +38,10 @@ def create_app(service: InferenceService | None = None, prediction_log: Predicti
         start = time.perf_counter()
         app.state.service = service or InferenceService.from_settings(settings)
         logger.info("model_loaded seconds=%.2f classes=%s", time.perf_counter() - start, app.state.service.labels)
+        metrics.MODEL_LOADED.set(1)
+        metrics.MODEL_INFO.labels(model_version=settings.model_version).set(1)
         yield
+        metrics.MODEL_LOADED.set(0)
 
     app = FastAPI(
         title="ViT LoRA Inference Service",
@@ -44,12 +49,18 @@ def create_app(service: InferenceService | None = None, prediction_log: Predicti
         version="1.0.0",
         lifespan=lifespan,
     )
+    app.middleware("http")(metrics.track_requests)
 
     @app.get("/health", response_model=HealthResponse)
     def health(request: Request) -> HealthResponse:
         svc: InferenceService | None = getattr(request.app.state, "service", None)
         return HealthResponse(status="ok", model_loaded=svc is not None, model_version=settings.model_version,
                               classes=svc.labels if svc else [])
+
+    @app.get("/metrics", include_in_schema=False)
+    def prometheus_metrics() -> Response:
+        """Current metric values in Prometheus text format (scraped by Prometheus)."""
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     # A plain `def` (not `async def`): model inference is CPU-bound and blocking, so
     # FastAPI runs it in a worker thread instead of freezing the event loop.
@@ -77,6 +88,7 @@ def create_app(service: InferenceService | None = None, prediction_log: Predicti
         elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
 
         request_id = uuid.uuid4().hex
+        metrics.observe_prediction(scores[0].label, scores[0].confidence, elapsed_ms / 1000)
         logger.info("prediction request_id=%s label=%s confidence=%.4f inference_ms=%.2f size=%dx%d",
                     request_id, scores[0].label, scores[0].confidence, elapsed_ms, *image.size)
         prediction_log.log_prediction({
