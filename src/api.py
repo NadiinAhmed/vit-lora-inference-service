@@ -7,23 +7,27 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 
 from src.config import get_settings
+from src.image_stats import compute_image_stats
 from src.inference import InferenceService
+from src.prediction_log import PredictionLog
 from src.preprocessing import InvalidImageError, decode_image
 from src.schemas import ClassProbability, HealthResponse, PredictionResponse
 
 logger = logging.getLogger("vit_service")
 
 
-def create_app(service: InferenceService | None = None) -> FastAPI:
-    """Build the app. Tests inject a small service; production loads the real model."""
+def create_app(service: InferenceService | None = None, prediction_log: PredictionLog | None = None) -> FastAPI:
+    """Build the app. Tests inject a small service and a temporary log; production loads the real ones."""
     settings = get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    prediction_log = prediction_log or PredictionLog(settings.log_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -44,7 +48,8 @@ def create_app(service: InferenceService | None = None) -> FastAPI:
     @app.get("/health", response_model=HealthResponse)
     def health(request: Request) -> HealthResponse:
         svc: InferenceService | None = getattr(request.app.state, "service", None)
-        return HealthResponse(status="ok", model_loaded=svc is not None, classes=svc.labels if svc else [])
+        return HealthResponse(status="ok", model_loaded=svc is not None, model_version=settings.model_version,
+                              classes=svc.labels if svc else [])
 
     # A plain `def` (not `async def`): model inference is CPU-bound and blocking, so
     # FastAPI runs it in a worker thread instead of freezing the event loop.
@@ -71,9 +76,21 @@ def create_app(service: InferenceService | None = None) -> FastAPI:
         scores = request.app.state.service.predict(image)
         elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
 
-        logger.info("prediction label=%s confidence=%.4f inference_ms=%.2f size=%dx%d",
-                    scores[0].label, scores[0].confidence, elapsed_ms, *image.size)
+        request_id = uuid.uuid4().hex
+        logger.info("prediction request_id=%s label=%s confidence=%.4f inference_ms=%.2f size=%dx%d",
+                    request_id, scores[0].label, scores[0].confidence, elapsed_ms, *image.size)
+        prediction_log.log_prediction({
+            "request_id": request_id,
+            "model_version": settings.model_version,
+            "label": scores[0].label,
+            "confidence": scores[0].confidence,
+            "inference_ms": elapsed_ms,
+            "width": image.size[0],
+            "height": image.size[1],
+            **compute_image_stats(image),
+        })
         return PredictionResponse(
+            request_id=request_id,
             label=scores[0].label,
             confidence=scores[0].confidence,
             top_k=[ClassProbability(label=s.label, confidence=s.confidence) for s in scores],
