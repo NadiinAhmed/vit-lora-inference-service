@@ -1,6 +1,7 @@
-"""FastAPI application exposing GET /health and POST /predict.
+"""FastAPI application exposing GET /health, POST /predict, POST /feedback and GET /metrics.
 
 Request flow:  route -> validate upload -> decode image -> InferenceService -> response schema
+                                                                        └-> monitoring log + metrics
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from src.image_stats import compute_image_stats
 from src.inference import InferenceService
 from src.prediction_log import PredictionLog
 from src.preprocessing import InvalidImageError, decode_image
-from src.schemas import ClassProbability, HealthResponse, PredictionResponse
+from src.schemas import ClassProbability, FeedbackRequest, FeedbackResponse, HealthResponse, PredictionResponse
 
 logger = logging.getLogger("vit_service")
 
@@ -108,6 +109,26 @@ def create_app(service: InferenceService | None = None, prediction_log: Predicti
             top_k=[ClassProbability(label=s.label, confidence=s.confidence) for s in scores],
             inference_ms=elapsed_ms,
         )
+
+    @app.post("/feedback", response_model=FeedbackResponse,
+              responses={404: {"description": "Unknown request_id"}, 422: {"description": "Unknown class"}})
+    def feedback(request: Request, body: FeedbackRequest) -> FeedbackResponse:
+        """Attach the true label to an earlier prediction (ground truth often arrives later)."""
+        labels = request.app.state.service.labels
+        if body.true_label not in labels:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                                f"true_label must be one of {labels}.")
+        predicted = prediction_log.predicted_label(body.request_id)
+        if predicted is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No prediction with this request_id.")
+
+        correct = predicted == body.true_label
+        prediction_log.log_feedback(body.request_id, body.true_label)
+        metrics.FEEDBACK.labels(correct=str(correct).lower()).inc()
+        logger.info("feedback request_id=%s predicted=%s true=%s correct=%s",
+                    body.request_id, predicted, body.true_label, correct)
+        return FeedbackResponse(request_id=body.request_id, predicted_label=predicted,
+                                true_label=body.true_label, correct=correct)
 
     return app
 

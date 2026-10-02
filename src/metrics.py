@@ -37,6 +37,11 @@ CONFIDENCE = Histogram(
     buckets=(0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99, 1.0),
 )
 
+FEEDBACK = Counter(
+    "model_feedback_total", "Ground-truth labels received, split by whether the prediction was correct.",
+    ["correct"],
+)
+
 
 def observe_prediction(label: str, confidence: float, inference_seconds: float) -> None:
     PREDICTIONS.labels(label=label).inc()

@@ -22,3 +22,16 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     model_version: str = Field(examples=["model-v1.0.0"])
     classes: list[str]
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str = Field(description="request_id returned by POST /predict.",
+                            examples=["3f2b9c0e8d4a4f6b9e1c2d3a4b5c6d7e"])
+    true_label: str = Field(description="The correct class, e.g. confirmed by a human.", examples=["glass"])
+
+
+class FeedbackResponse(BaseModel):
+    request_id: str
+    predicted_label: str
+    true_label: str
+    correct: bool

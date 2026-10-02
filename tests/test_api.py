@@ -117,3 +117,42 @@ def test_unknown_paths_share_one_metric_label(client: TestClient) -> None:
     before = _metric("http_requests_total", method="GET", path="unmatched", status="404")
     client.get("/wp-admin/random-scanner-path")
     assert _metric("http_requests_total", method="GET", path="unmatched", status="404") == before + 1
+
+
+def _predict(client: TestClient) -> dict:
+    return client.post("/predict", files={"file": ("a.png", image_bytes(), "image/png")}).json()
+
+
+def test_feedback_records_true_label(client: TestClient, prediction_log: PredictionLog) -> None:
+    prediction = _predict(client)
+    wrong_label = next(name for name in CLASS_NAMES if name != prediction["label"])
+    incorrect_before = _metric("model_feedback_total", correct="false")
+
+    response = client.post("/feedback", json={"request_id": prediction["request_id"], "true_label": wrong_label})
+
+    assert response.status_code == 200
+    assert response.json() == {"request_id": prediction["request_id"], "predicted_label": prediction["label"],
+                               "true_label": wrong_label, "correct": False}
+    record = json.loads(prediction_log.feedback_path.read_text())
+    assert (record["request_id"], record["true_label"]) == (prediction["request_id"], wrong_label)
+    assert _metric("model_feedback_total", correct="false") == incorrect_before + 1
+
+
+def test_feedback_rejects_unknown_request_id(client: TestClient) -> None:
+    response = client.post("/feedback", json={"request_id": "does-not-exist", "true_label": "glass"})
+    assert response.status_code == 404
+
+
+def test_feedback_rejects_unknown_class(client: TestClient) -> None:
+    prediction = _predict(client)
+    response = client.post("/feedback", json={"request_id": prediction["request_id"], "true_label": "banana"})
+    assert response.status_code == 422
+
+
+def test_feedback_still_works_after_restart(service: InferenceService, prediction_log: PredictionLog) -> None:
+    with TestClient(create_app(service=service, prediction_log=prediction_log)) as first_run:
+        request_id = _predict(first_run)["request_id"]
+    restarted_log = PredictionLog(prediction_log.predictions_path.parent)  # a fresh process reads the file
+    with TestClient(create_app(service=service, prediction_log=restarted_log)) as second_run:
+        response = second_run.post("/feedback", json={"request_id": request_id, "true_label": "glass"})
+    assert response.status_code == 200
