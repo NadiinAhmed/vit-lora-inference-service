@@ -1,0 +1,12 @@
+# Prometheus pulls ("scrapes") GET /metrics from the API and stores every value with a timestamp.
+global:
+  scrape_interval: 5s        # short for a live demo; 15-30s is typical in production
+  evaluation_interval: 5s    # how often alert rules are checked
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: vit-inference
+    static_configs:
+      - targets: ["api:8000"]   # the service name from docker-compose.yml

@@ -1,0 +1,53 @@
+# Local monitoring stack: the inference API + Prometheus (collects metrics) + Grafana (dashboard).
+#
+#   docker compose up -d --build
+#
+#   API         http://localhost:8000/docs
+#   Prometheus  http://localhost:9090   (Alerts tab: alert rules and their state)
+#   Grafana     http://localhost:3000   (opens on the "ViT Inference Service" dashboard)
+#
+# The API port can be changed if 8000 is busy:  $env:API_PORT=8001; docker compose up -d
+services:
+  api:
+    build: .
+    image: vit-lora-inference-service
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # Prediction/feedback logs land in ./logs on the host, so `python -m monitoring.report`
+      # can analyse the traffic the container served.
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.9.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.4.9
+    ports:
+      - "3000:3000"
+    environment:
+      # Local demo only: anyone who opens the page can view dashboards without logging in.
+      # Admin login (for editing) stays admin / admin.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/vit-inference.json
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:

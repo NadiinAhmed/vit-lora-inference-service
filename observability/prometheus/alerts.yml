@@ -1,0 +1,68 @@
+# Alert rules, visible in Prometheus under "Alerts" (inactive -> pending -> firing).
+# `for:` means the condition must hold that long before firing, so one slow request
+# or one odd image doesn't cause an alert.
+#
+# Thresholds for the model come from the reference baseline (reports/monitoring):
+#   reference accuracy 0.918, reference share of predictions below 0.7 confidence 3.7%
+groups:
+  - name: service
+    rules:
+      - alert: ServiceDown
+        expr: up{job="vit-inference"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "Prometheus cannot reach the inference API."
+
+      - alert: ModelNotLoaded
+        expr: model_loaded == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "The API is up but the model is not loaded."
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m])) > 0.05
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 5% of requests fail with a server error."
+
+      - alert: HighPredictLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{path="/predict"}[5m]))) > 1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "95% of /predict requests should finish within 1 s; they currently don't."
+
+  - name: model
+    rules:
+      # Works without labels: the model is unsure much more often than in the reference.
+      - alert: LowConfidenceSpike
+        expr: |
+          (
+            sum(rate(model_prediction_confidence_bucket{le="0.7"}[2m]))
+              / sum(rate(model_prediction_confidence_count[2m])) > 0.075
+          )
+          and on() sum(increase(model_prediction_confidence_count[2m])) >= 50
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "Over 7.5% of predictions have confidence below 0.7 (reference: 3.7%). Possible data drift."
+
+      # Needs labels from POST /feedback: accuracy is 5+ points below the reference.
+      - alert: AccuracyBelowReference
+        expr: |
+          (
+            sum(rate(model_feedback_total{correct="true"}[5m]))
+              / sum(rate(model_feedback_total[5m])) < 0.868
+          )
+          and on() sum(increase(model_feedback_total[5m])) >= 50
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "Live accuracy is more than 5 points below the reference accuracy (0.918)."
