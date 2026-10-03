@@ -17,6 +17,9 @@ data/
 *.bin
 *.safetensors
 
+# Monitoring logs written by the running service
+logs/
+
 # Notebooks
 .ipynb_checkpoints/
 

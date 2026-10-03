@@ -1,0 +1,116 @@
+{
+  "status": "OK",
+  "generated_at": "2026-10-03T11:12:16+00:00",
+  "model_version": "model-v1.0.0",
+  "reference_images": 379,
+  "predictions": 379,
+  "period": [
+    "2026-10-03T10:39:44.119757+00:00",
+    "2026-10-03T11:07:17.743382+00:00"
+  ],
+  "inference_ms_p50": 253.25,
+  "inference_ms_p95": 375.8,
+  "data_drift": {
+    "status": "OK",
+    "features": {
+      "brightness": {
+        "psi": 0.0446,
+        "ks": 0.0396,
+        "status": "OK",
+        "reference_mean": 0.6421,
+        "production_mean": 0.6436
+      },
+      "contrast": {
+        "psi": 0.0805,
+        "ks": 0.0501,
+        "status": "OK",
+        "reference_mean": 0.1798,
+        "production_mean": 0.177
+      },
+      "saturation": {
+        "psi": 0.0767,
+        "ks": 0.0475,
+        "status": "OK",
+        "reference_mean": 0.1794,
+        "production_mean": 0.1783
+      },
+      "aspect_ratio": {
+        "psi": 0.0,
+        "ks": 0.0,
+        "status": "OK",
+        "reference_mean": 1.3333,
+        "production_mean": 1.3333
+      }
+    }
+  },
+  "prediction_drift": {
+    "status": "OK",
+    "class_psi": 0.0037,
+    "class_status": "OK",
+    "class_shares": {
+      "cardboard": {
+        "reference": 0.1609,
+        "production": 0.1583
+      },
+      "glass": {
+        "reference": 0.2084,
+        "production": 0.1873
+      },
+      "metal": {
+        "reference": 0.1609,
+        "production": 0.1662
+      },
+      "paper": {
+        "reference": 0.219,
+        "production": 0.2348
+      },
+      "plastic": {
+        "reference": 0.1953,
+        "production": 0.1953
+      },
+      "trash": {
+        "reference": 0.0554,
+        "production": 0.058
+      }
+    },
+    "confidence": {
+      "psi": 0.0249,
+      "ks": 0.0449,
+      "status": "OK",
+      "reference_mean": 0.9627,
+      "production_mean": 0.959,
+      "reference_low_share": 0.0369,
+      "production_low_share": 0.0475
+    }
+  },
+  "performance": {
+    "status": "OK",
+    "accuracy_drop": -0.0422,
+    "production": {
+      "accuracy": 0.9604,
+      "macro_f1": 0.9513,
+      "per_class_f1": {
+        "cardboard": 0.9667,
+        "glass": 0.9589,
+        "metal": 0.976,
+        "paper": 0.9775,
+        "plastic": 0.9452,
+        "trash": 0.8837
+      }
+    },
+    "labelled_predictions": 379,
+    "label_coverage": 1.0,
+    "reference": {
+      "accuracy": 0.9182,
+      "macro_f1": 0.8839,
+      "per_class_f1": {
+        "cardboard": 0.9587,
+        "glass": 0.9481,
+        "metal": 0.9431,
+        "paper": 0.9302,
+        "plastic": 0.9041,
+        "trash": 0.619
+      }
+    }
+  }
+}

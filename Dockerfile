@@ -21,6 +21,8 @@ RUN pip install -r requirements.txt
 RUN useradd --create-home --uid 1000 appuser
 COPY --chown=1000:1000 src/ ./src/
 COPY --chown=1000:1000 models/quantized/ ./models/quantized/
+# Monitoring logs (predictions/feedback). Mount a volume here to keep them after the container stops.
+RUN mkdir /app/logs && chown 1000:1000 /app/logs
 USER 1000
 
 EXPOSE 8000

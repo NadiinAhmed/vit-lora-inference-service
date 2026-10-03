@@ -1,0 +1,8 @@
+# Loads every dashboard JSON file from /var/lib/grafana/dashboards at startup.
+apiVersion: 1
+providers:
+  - name: vit-inference
+    folder: ""
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
