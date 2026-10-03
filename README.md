@@ -241,7 +241,9 @@ Interactive docs (Swagger UI): `http://localhost:8000/docs`
 
 ### GET /health
 
+```json
 {"status": "ok", "model_loaded": true, "model_version": "model-v1.0.0", "classes": ["cardboard", "glass", "metal", "paper", "plastic", "trash"]}
+```
 
 ### POST /predict
 
