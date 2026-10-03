@@ -242,7 +242,7 @@ Interactive docs (Swagger UI): `http://localhost:8000/docs`
 ### GET /health
 
 ```json
-{"status": "ok", "model_loaded": true, "classes": ["cardboard", "glass", "metal", "paper", "plastic", "trash"]}
+{"status": "ok", "model_loaded": true, "model_version": "model-v1.0.0", "classes": ["cardboard", "glass", "metal", "paper", "plastic", "trash"]}
 ```
 
 ### POST /predict
@@ -589,7 +589,7 @@ The minimum-volume conditions stop the model alerts from firing on the first few
 
 - TrashNet images are studio-style photos of a single item on a plain background; accuracy on cluttered real-world photos will be lower.
 - 2,527 images in total; test metrics rest on 379 images (only 21 of them "trash"), so they have noticeable variance.
-- The "trash" class is the weakest (test F1 0.605).
+- The "trash" class is the weakest (test F1 0.619).
 - One image per request, no batching; a single Uvicorn worker.
 - Quantization speed depends heavily on the CPU: `dynamic` INT8 was ~16× slower than FP32 on the development laptop, hence the `weight_only` default, which reduces memory but does not speed up inference. Reported latencies are for the machine that produced the report.
 - No authentication or rate limiting.
