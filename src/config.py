@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     model_dir: Path = PROJECT_ROOT / "models"
     data_dir: Path = PROJECT_ROOT / "data"        # downloaded datasets (git-ignored)
     reports_dir: Path = PROJECT_ROOT / "reports"  # small JSON results (committed)
+    model_version: str = "model-v1.0.0"            # tagged on every logged prediction
 
     # --- Serving -----------------------------------------------------------
     top_k: int = Field(default=3, ge=1)
@@ -34,6 +35,9 @@ class Settings(BaseSettings):
     #   weight_only - INT8 weights in memory, float math: ~4x less weight memory, works well on any CPU
     #   dynamic     - INT8 x INT8 math: faster only on CPUs with fast integer matmul (e.g. VNNI/AMX)
     quantization_mode: Literal["weight_only", "dynamic"] = "weight_only"
+
+    # --- Monitoring --------------------------------------------------------
+    log_dir: Path = PROJECT_ROOT / "logs"  # predictions.jsonl / feedback.jsonl (git-ignored)
 
     # --- Derived artifact locations ---------------------------------------
     @property

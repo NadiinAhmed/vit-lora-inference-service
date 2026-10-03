@@ -1,6 +1,6 @@
 # ViT LoRA Inference Service
 
-An end-to-end Vision Transformer image classification service featuring parameter-efficient LoRA fine-tuning, model quantization, FastAPI inference, Docker containerization, automated testing, and an MLOps CI/CD pipeline that validates, packages and deploys the model on every change.
+An end-to-end Vision Transformer image classification service featuring parameter-efficient LoRA fine-tuning, model quantization, FastAPI inference, Docker containerization, automated testing, an MLOps CI/CD pipeline that validates, packages and deploys the model on every change, and ML observability: data drift, prediction drift, live accuracy, service metrics, a Grafana dashboard and alerts.
 
 ## Overview
 
@@ -19,6 +19,8 @@ The pipeline covers the full lifecycle: fine-tune a pretrained ViT with LoRA, ke
 - Automated tests (unit + API + real-model smoke test)
 - MLOps CI/CD with GitHub Actions: tests → model validation → Docker build → deployment verification
 - Versioned model artifact (GitHub Release) pinned by SHA-256, with an automated model quality gate
+- ML observability: structured prediction logs, ground-truth feedback endpoint, Prometheus metrics, drift and performance reports against a reference baseline
+- Monitoring stack with Docker Compose: Prometheus, Grafana dashboard and alert rules
 
 ## Architecture
 
@@ -48,6 +50,19 @@ flowchart LR
     S --> U
 ```
 
+**Monitoring (Docker Compose):**
+
+```mermaid
+flowchart LR
+    C[Client] -->|POST /predict| API[FastAPI service]
+    C -->|POST /feedback<br/>true label, later| API
+    API -->|predictions.jsonl<br/>feedback.jsonl| L[(Logs)]
+    API -->|GET /metrics| P[Prometheus<br/>+ alert rules]
+    P --> G[Grafana dashboard]
+    L --> R[monitoring.report<br/>drift + performance]
+    REF[(Reference baseline<br/>test split)] --> R
+```
+
 The same `src/preprocessing.py` is used in training and serving, so the model sees images prepared identically in both (no training/serving skew).
 
 ## Technologies
@@ -65,6 +80,9 @@ The same `src/preprocessing.py` is used in training and serving, so the model se
 | GitHub Actions | CI/CD pipeline (`.github/workflows/ci-cd.yml`) |
 | GitHub Releases | Versioned storage for the serving model artifact |
 | GitHub Container Registry (GHCR) | Registry for the deployed Docker image |
+| Prometheus (+ prometheus-client) | Metrics collection, history and alert rules |
+| Grafana | Monitoring dashboard |
+| Docker Compose | Runs the API, Prometheus and Grafana together |
 
 ## Project Structure
 
@@ -74,8 +92,18 @@ src/                      Serving code + components shared with training
   preprocessing.py        Image decoding/validation and ViT preprocessing (shared)
   model.py                Model construction, INT8 quantization, save/load
   inference.py            InferenceService: model loaded once, top-k predictions
-  schemas.py              Pydantic API response models
-  api.py                  FastAPI app: GET /health, POST /predict
+  schemas.py              Pydantic API request/response models
+  api.py                  FastAPI app: /health, /predict, /feedback, /metrics
+  metrics.py              Prometheus metrics (requests, latency, predictions, confidence, feedback)
+  prediction_log.py       Structured JSON Lines logs of predictions and feedback
+  image_stats.py          Image statistics used for data drift (shared with the reference builder)
+monitoring/               Offline monitoring tools (not in the Docker image)
+  build_reference.py      Reference baseline: model behaviour on the held-out test split
+  drift.py                PSI and KS drift statistics, thresholds
+  report.py               Drift + performance report vs the reference (Markdown + JSON)
+  simulate_traffic.py     Demo traffic: normal or darkened images, plus feedback labels
+observability/            Prometheus config + alert rules, Grafana datasource + dashboard
+docker-compose.yml        API + Prometheus + Grafana
 training/                 Offline pipeline — never shipped in the Docker image
   data.py                 TrashNet download, stratified split, Dataset
   evaluation.py           Accuracy, macro-F1, per-class F1, confusion matrix
@@ -83,11 +111,12 @@ training/                 Offline pipeline — never shipped in the Docker image
   quantize.py             Merge LoRA -> INT8 -> measure -> save -> verify reload
 tests/                    pytest suite
   assets/sample.jpg       Real photo used by the deployment smoke test
-reports/                  JSON results from training and quantization (committed)
+reports/                  JSON results from training and quantization, monitoring reference and example reports
+docs/images/              Dashboard and alert screenshots
 models/                   Generated model artifacts (git-ignored; published as a GitHub Release)
 scripts/
   check_model_metrics.py  Model quality gate used by CI
-  smoke_test.sh           HTTP smoke test of a running container (CI and deployment verification)
+  smoke_test.sh           HTTP smoke test of a running container: health, predict, feedback, metrics
 .github/workflows/
   ci-cd.yml               GitHub Actions pipeline: test -> model-validation -> docker-build -> deploy
 model_artifact.sha256     SHA-256 pin of the released model files
@@ -231,6 +260,8 @@ curl.exe -X POST http://localhost:8000/predict -F "file=@bottle.jpg"
 
 Real response from the Dockerized service, for a photo of cardboard pieces that is not part of TrashNet:
 
+Every response also contains a `request_id` (used by `/feedback`), omitted below for brevity.
+
 ```json
 {
   "label": "cardboard",
@@ -251,6 +282,25 @@ Real response from the Dockerized service, for a photo of cardboard pieces that 
 | 413 | File larger than `APP_MAX_IMAGE_BYTES` (default 5 MB) |
 | 415 | Content type is not `image/*` |
 | 422 | No `file` field in the request |
+
+### POST /feedback
+
+Attaches the true label to an earlier prediction, for example after a person checked it. Ground truth usually arrives later than the prediction, so it is a separate call.
+
+```bash
+curl -X POST http://localhost:8000/feedback -H "Content-Type: application/json" \
+  -d '{"request_id": "3f2b9c0e8d4a4f6b9e1c2d3a4b5c6d7e", "true_label": "glass"}'
+```
+
+```json
+{"request_id": "3f2b9c0e8d4a4f6b9e1c2d3a4b5c6d7e", "predicted_label": "glass", "true_label": "glass", "correct": true}
+```
+
+Returns `404` for an unknown `request_id` and `422` for an unknown class.
+
+### GET /metrics
+
+Current metric values in Prometheus text format, scraped by Prometheus (see [Monitoring and Observability](#monitoring-and-observability)).
 
 ## Running Locally
 
@@ -303,7 +353,9 @@ pytest
 | File | What it covers |
 |---|---|
 | `tests/test_inference.py` | Image decoding for all colour modes, rejection of corrupt input, preprocessing shape, deterministic quantized save/load, top-k ordering and capping |
-| `tests/test_api.py` | `/health`, successful `/predict`, and the 400 / 413 / 415 / 422 error paths |
+| `tests/test_api.py` | `/health`, `/predict` and its 400 / 413 / 415 / 422 error paths, prediction logging, `/metrics`, `/feedback` |
+| `tests/test_image_stats.py`, `tests/test_drift.py` | Image statistics and the PSI / KS drift calculations on known cases |
+| `tests/test_build_reference.py`, `tests/test_report.py`, `tests/test_simulate_traffic.py` | Reference baseline, drift/performance report statuses, traffic simulator |
 | `tests/test_data.py` | Stratified split proportions, no train/test leakage, determinism, dataset folder discovery, metric correctness on a known case |
 | `tests/test_real_model.py` | Loads the real quantized model and predicts (skipped until it exists) |
 
@@ -382,7 +434,7 @@ A release is a pull request from `develop` into `main`.
 |---|---|---|
 | `test` | Is the **code** correct? | Runs the pytest suite with a tiny random ViT (fast, offline). |
 | `model-validation` | Is the **model** correct? | Downloads release `model-v1.0.0`, verifies SHA-256, runs the quality gate on the reported INT8 test metrics, runs inference with the real model, and hands the verified model to the next job as a workflow artifact. |
-| `docker-build` | Is the **service** correct? | Builds the image with the verified model, starts it, and runs `scripts/smoke_test.sh`: `/health`, a real photo through `/predict` (must be classified correctly), and rejection of non-images. On `main` it publishes the image to GHCR, tagged with the commit SHA. |
+| `docker-build` | Is the **service** correct? | Builds the image with the verified model, starts it, and runs `scripts/smoke_test.sh`: `/health`, a real photo through `/predict` (must be classified correctly), rejection of non-images, `/feedback` for that prediction, and the monitoring metrics on `/metrics`. On `main` it publishes the image to GHCR, tagged with the commit SHA. |
 | `deploy` | Is the **release** correct? | Pulls the exact image built for this commit, starts it, repeats the smoke test, waits for Docker's HEALTHCHECK to report `healthy`, then promotes the image to `:latest`. |
 
 ### Triggers
@@ -437,6 +489,83 @@ docker run -d --name inference -p 8000:8000 vit-lora-inference-service
 bash scripts/smoke_test.sh http://localhost:8000 tests/assets/sample.jpg cardboard
 ```
 
+## Monitoring and Observability
+
+A model can fail silently: the API keeps answering `200 OK` while the inputs change and the predictions get worse. The service is therefore monitored at three levels:
+
+| Level | Question | Signals | Needs labels? |
+|---|---|---|---|
+| Service | Is the API up, fast and error-free? | uptime, requests/s, error rate, latency p50/p95/p99, CPU, memory | No |
+| Data and predictions | Do inputs and predictions look like they used to? | image brightness / contrast / saturation / aspect ratio, class mix, confidence | No |
+| Model performance | Is the model still correct? | accuracy and macro-F1 from `/feedback` labels | Yes |
+
+### How it works
+
+1. **Logging.** Every prediction is written to `logs/predictions.jsonl` with a `request_id`, model version, label, confidence, latency and image statistics. The image itself is never stored.
+2. **Feedback.** `POST /feedback` attaches a true label to a `request_id` (`logs/feedback.jsonl`).
+3. **Reference baseline.** `python -m monitoring.build_reference` records how the model behaves on the 379 held-out **test** images, never seen in training (`reports/monitoring_reference.jsonl`). This defines "normal".
+4. **Metrics in real time.** `/metrics` exposes counters and histograms; Prometheus scrapes them every 5 s, Grafana shows them, and alert rules check them.
+5. **Drift report on demand.** `python -m monitoring.report` compares the logs with the reference: PSI and KS distance per image statistic, class-mix PSI, confidence drift, and accuracy/macro-F1 on labelled predictions. Statuses are OK / WARNING / ALERT, and NOT ENOUGH DATA below 300 predictions (or 100 labels for performance).
+
+The two paths complement each other: Prometheus is live and cheap but only sees aggregates; the report reads the full logs and can compare whole distributions with the reference.
+
+### Running the monitoring stack
+
+```bash
+docker compose up -d --build     # API :8000, Prometheus :9090, Grafana :3000
+```
+
+Grafana opens directly on the **ViT Inference Service** dashboard (no login needed to view). The API port can be changed with `API_PORT=8001` if 8000 is busy. Prediction logs are written to `./logs` on the host, so the report can analyse the traffic the container served.
+
+### Demo: normal vs darkened images
+
+`monitoring/simulate_traffic.py` sends the 379 TrashNet validation images to the service and then their true labels to `/feedback`. The `dark` scenario sends the same images at 45% brightness, like a badly lit sorting line.
+
+```bash
+python -m monitoring.simulate_traffic --scenario normal
+python -m monitoring.report --last 379 --output-dir reports/monitoring/normal
+
+python -m monitoring.simulate_traffic --scenario dark
+python -m monitoring.report --last 379 --output-dir reports/monitoring/dark
+```
+
+Results (full reports in [`reports/monitoring/normal`](reports/monitoring/normal/report.md) and [`reports/monitoring/dark`](reports/monitoring/dark/report.md)):
+
+| | Reference (test set) | Normal | Dark |
+|---|---|---|---|
+| Mean brightness | 0.642 | 0.644 (PSI 0.04, OK) | **0.288** (PSI 15.3, ALERT) |
+| Contrast | 0.180 | 0.177 (OK) | **0.080** (ALERT) |
+| Saturation / aspect ratio | | OK | OK |
+| Predictions below 0.7 confidence | 3.7% | 4.8% | **9.2%** (ALERT) |
+| Share predicted as "trash" | 5.5% | 5.8% | 9.0% |
+| Accuracy | 0.918 | 0.960 | 0.895 |
+| **Overall status** | | 🟢 OK | 🔴 ALERT (data + prediction drift), performance OK |
+
+What this shows:
+
+- **The report finds the cause, not only the symptom.** Brightness and contrast drift, while saturation and aspect ratio do not: the lighting changed, not the camera or the objects.
+- **Drift is a warning, not a verdict.** Without labels, the drop in confidence is the early signal. With labels, accuracy is still above the alert threshold, so the right reaction is to investigate, not to retrain immediately.
+- **A baseline is only as fair as its data.** Both demo runs use the *same* 379 images: darkening costs 6.6 accuracy points (0.960 → 0.895). Measured against the reference (0.918), it looks like only 2.4 points, because the validation images were used to select the best checkpoint, so the model scores unusually well on them. In production, accuracy should also be compared with recent time windows, not only with the original baseline.
+
+### Dashboard and alerts
+
+![Grafana dashboard during the normal and dark runs](docs/images/grafana-dashboard.png)
+
+During the dark run, `LowConfidenceSpike` went from inactive to pending to **firing**, without any labels, while `AccuracyBelowReference` correctly stayed inactive (live accuracy 89.4%, the same value as the offline report):
+
+![LowConfidenceSpike firing in Prometheus](docs/images/alert-firing.png)
+
+| Alert | Condition | Severity |
+|---|---|---|
+| `ServiceDown` | Prometheus cannot reach the API for 1 min | critical |
+| `ModelNotLoaded` | API up but model not loaded for 1 min | critical |
+| `HighErrorRate` | > 5% of requests return 5xx for 2 min | warning |
+| `HighPredictLatency` | `/predict` p95 > 1 s for 5 min | warning |
+| `LowConfidenceSpike` | > 7.5% of predictions below 0.7 confidence (about 2× the reference 3.7%), at least 50 predictions, for 1 min | warning |
+| `AccuracyBelowReference` | live accuracy < 0.868 (reference − 5 points), at least 50 labels, for 1 min | critical |
+
+The minimum-volume conditions stop the model alerts from firing on the first few requests, where one unsure prediction can make the share jump to 25%.
+
 ## Engineering Decisions
 
 - **Train on GPU, serve on CPU.** Training benefits from the GPU; the served model is quantized for cheap CPU inference, which is how most small inference services are deployed.
@@ -450,6 +579,10 @@ bash scripts/smoke_test.sh http://localhost:8000 tests/assets/sample.jpg cardboa
 - **No retraining in CI.** Training is a deliberate offline step; CI validates and ships the released model artifact.
 - **Model pinned by checksum, not stored in Git.** Keeps the repository small while making every build traceable to exact model bytes.
 - **Build once, promote the same image.** Deployment reuses the tested image instead of rebuilding it.
+- **Monitoring with plain JSON Lines + Prometheus instead of a monitoring platform.** Image statistics turn images into numbers that drift tests can use; PSI and KS are implemented in a few lines of NumPy with explicit thresholds, so every status in the report can be explained.
+- **Reference baseline from the held-out test split**, not the training data: the model is overconfident on images it trained on, which would make all real traffic look like drift.
+- **The image statistics code is shared** by the service and the reference builder, so a difference in calculation can never be mistaken for drift.
+- **Metric labels use route templates** (`/predict`), never raw URLs, to keep Prometheus label cardinality bounded.
 - **Docker layering.** CPU-only torch is installed in its own cached layer; code and model are copied last because they change most often. Runs as a non-root user with `HF_HUB_OFFLINE=1`.
 
 ## Limitations
@@ -462,6 +595,9 @@ bash scripts/smoke_test.sh http://localhost:8000 tests/assets/sample.jpg cardboa
 - No authentication or rate limiting.
 - The quality gate checks the metrics recorded when the model was produced; CI does not re-evaluate the model on the test set.
 - Deployment is verified on a GitHub-hosted runner, not on a long-running server.
+- Alerts are visible in Prometheus and Grafana but not sent anywhere (no Alertmanager, email or Slack).
+- Prediction logs are local files on one machine, without rotation; the drift report is run manually, not on a schedule.
+- The demo traffic is simulated from TrashNet validation images; real drift would come from new cameras, lighting or waste types.
 
 ## Future Improvements
 
@@ -469,8 +605,9 @@ bash scripts/smoke_test.sh http://localhost:8000 tests/assets/sample.jpg cardboa
 - GPU inference option; ONNX Runtime or `torch.compile` for further CPU speedups
 - Benchmark `dynamic` mode on a VNNI/AMX server CPU; static INT8 or lower-bit quantization, evaluated against the same test split
 - Training on more varied, real-world waste images
-- Model monitoring (prediction distribution, confidence drift)
-- Automated retraining pipeline triggered by new labelled data (CI/CD with GitHub Actions is now implemented)
+- Alertmanager notifications (email/Slack) and a scheduled drift report job
+- Accuracy alerts relative to recent time windows, not only the original baseline
+- Automated retraining pipeline triggered by drift alerts and new labelled data (CI/CD with GitHub Actions is now implemented)
 - Re-evaluate the model on the held-out test set inside CI instead of trusting the committed report
 - Dedicated model registry (e.g. MLflow) and loading the model at startup instead of baking it into the image
 - Cloud deployment, Kubernetes, authentication and rate limiting

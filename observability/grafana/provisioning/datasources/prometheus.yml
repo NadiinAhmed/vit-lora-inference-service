@@ -1,0 +1,11 @@
+# Connects Grafana to Prometheus automatically at startup (no clicking in the UI).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus           # the dashboard JSON refers to this uid
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 5s        # matches the scrape interval

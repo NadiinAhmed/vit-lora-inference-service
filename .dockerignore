@@ -15,3 +15,6 @@ tests
 requirements-train.txt
 requirements-dev.txt
 README.md
+observability
+docker-compose.yml
+logs
