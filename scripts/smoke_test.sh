@@ -3,6 +3,8 @@
 # Used twice by the pipeline: on the freshly built image (CI) and on the
 # deployed image pulled from the registry (CD verification).
 #
+# Covers /health, /predict, /feedback and /metrics.
+#
 # Usage: scripts/smoke_test.sh <base_url> <image_path> [expected_label]
 set -euo pipefail
 
@@ -61,5 +63,41 @@ if [ "${status}" != "415" ]; then
   exit 1
 fi
 echo "PASS  /predict rejects non-images (415)"
+
+# 5) Monitoring: ground-truth feedback can be attached to the prediction made in step 3.
+python3 - "${TMP}/predict.json" "${EXPECTED_LABEL}" > "${TMP}/feedback_body.json" <<'PY'
+import json, sys
+prediction = json.load(open(sys.argv[1]))
+true_label = sys.argv[2] or prediction["label"]
+print(json.dumps({"request_id": prediction["request_id"], "true_label": true_label}))
+PY
+curl -fsS -X POST "${BASE_URL}/feedback" -H "Content-Type: application/json" \
+  --data @"${TMP}/feedback_body.json" -o "${TMP}/feedback.json"
+echo "feedback: $(cat "${TMP}/feedback.json")"
+python3 - "${TMP}/feedback.json" <<'PY'
+import json, sys
+feedback = json.load(open(sys.argv[1]))
+assert feedback["predicted_label"] and feedback["true_label"], "incomplete feedback response"
+print(f"PASS  /feedback: label attached (correct={feedback['correct']})")
+PY
+
+status="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}/feedback" -H "Content-Type: application/json" \
+  --data '{"request_id": "does-not-exist", "true_label": "glass"}')"
+if [ "${status}" != "404" ]; then
+  echo "FAIL  feedback for an unknown request_id returned ${status}, expected 404"
+  exit 1
+fi
+echo "PASS  /feedback rejects unknown request_ids (404)"
+
+# 6) Monitoring: /metrics exposes the service and model metrics Prometheus scrapes.
+curl -fsS "${BASE_URL}/metrics" -o "${TMP}/metrics.txt"
+for metric in "model_loaded 1.0" "model_predictions_total" "model_prediction_confidence_bucket" \
+              "model_feedback_total" "http_requests_total" "http_request_duration_seconds_bucket"; do
+  if ! grep -q "^${metric}" "${TMP}/metrics.txt"; then
+    echo "FAIL  /metrics does not expose '${metric}'"
+    exit 1
+  fi
+done
+echo "PASS  /metrics exposes service and model metrics"
 
 echo "Smoke test passed."
